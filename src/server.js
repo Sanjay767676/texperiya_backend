@@ -1,0 +1,68 @@
+const app = require('./app');
+const { env, validateEnv } = require('./config/env');
+const { processPayments } = require('./services/paymentProcessor');
+
+// Validate environment variables before starting
+validateEnv();
+
+// To use ngrok:
+// 1. Run backend normally (npm start)
+// 2. Run: ngrok http 3000
+// 3. Copy HTTPS URL
+// 4. Set in .env:
+//    BASE_URL=https://your-ngrok-url.ngrok-free.app
+// 5. Restart server
+
+const server = app.listen(env.port, () => {
+    console.log(`Server is running on port ${env.port}`);
+    console.log('Running with BASE_URL:', process.env.BASE_URL);
+});
+
+// Automatic payment processing with overlap protection
+let isProcessing = false;
+
+const runAutomaticPaymentCheck = async () => {
+    if (isProcessing) {
+        console.log('[Payment Processor] Skipping cycle - previous check still running');
+        return;
+    }
+
+    isProcessing = true;
+
+    try {
+        await processPayments();
+    } catch (error) {
+        console.error('[Payment Processor] Auto payment check failed:', error.message);
+    } finally {
+        isProcessing = false;
+    }
+};
+
+// Start polling every 10 seconds
+const pollingInterval = setInterval(runAutomaticPaymentCheck, 10000);
+
+// Run first check immediately (optional - remove if you want to wait 10s)
+setTimeout(runAutomaticPaymentCheck, 2000);
+
+// Graceful shutdown handling
+const shutdown = (signal) => {
+    console.log(`Received ${signal}. Shutting down gracefully...`);
+    
+    // Stop polling
+    clearInterval(pollingInterval);
+    console.log('[Payment Processor] Automatic polling stopped');
+
+    server.close(() => {
+        console.log('HTTP server closed.');
+        process.exit(0);
+    });
+
+    // Force exit after 10 seconds
+    setTimeout(() => {
+        console.error('Forcefully shutting down.');
+        process.exit(1);
+    }, 10000).unref();
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

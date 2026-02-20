@@ -1,0 +1,10 @@
+node_modules/
+.env
+*.json
+!package.json
+!package-lock.json
+
+# Test/debug files
+test-*.js
+CREDENTIAL_VERIFICATION.md
+*.backup
