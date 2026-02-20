@@ -1,7 +1,19 @@
 const nodemailer = require('nodemailer');
 
+const smtpConfig = {
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+    tls: {
+        rejectUnauthorized: false,
+    },
+};
+
 const csTransporter = nodemailer.createTransport({
-    service: 'gmail',
+    ...smtpConfig,
     auth: {
         user: process.env.CS_EMAIL_USER,
         pass: process.env.CS_EMAIL_PASS,
@@ -9,24 +21,20 @@ const csTransporter = nodemailer.createTransport({
 });
 
 const ncsTransporter = nodemailer.createTransport({
-    service: 'gmail',
+    ...smtpConfig,
     auth: {
         user: process.env.NCS_EMAIL_USER,
         pass: process.env.NCS_EMAIL_PASS,
     },
 });
 
-csTransporter.verify((err) => {
-    if (!err) {
-        console.log('CS Mail Ready');
-    }
-});
+csTransporter.verify()
+    .then(() => console.log('CS SMTP Ready (port 587)'))
+    .catch((err) => console.error('CS SMTP verify failed:', err.message));
 
-ncsTransporter.verify((err) => {
-    if (!err) {
-        console.log('NCS Mail Ready');
-    }
-});
+ncsTransporter.verify()
+    .then(() => console.log('NCS SMTP Ready (port 587)'))
+    .catch((err) => console.error('NCS SMTP verify failed:', err.message));
 
 const getTransporter = (senderType) => {
     const type = String(senderType || '').toUpperCase();

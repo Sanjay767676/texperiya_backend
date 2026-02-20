@@ -204,70 +204,59 @@ const processPaymentTokens = async (spreadsheetId, pendingPayments, headers, sen
             const nameIdx = getColumnByAlias(headerMap, 'name');
             const emailIdx = getColumnByAlias(headerMap, 'email');
             
-            console.log(`[Payment Processing] 📧 Email column index: ${emailIdx}`);
-            
             const studentName = nameIdx !== -1 ? normalizeValue(latestRow[nameIdx]) || 'Student' : 'Student';
             const studentEmail = emailIdx !== -1 ? normalizeValue(latestRow[emailIdx]) : '';
 
-            console.log(`[Payment Processing] 👤 Student Name: ${studentName}`);
-            console.log(`[Payment Processing] 📧 Student Email: ${studentEmail ? studentEmail : '(empty)'}`);
+            // PHASE 3+4: Update sheet FIRST (token, QR, timestamp) before sending email
+            const updates = {
+                token: token,
+                qrLink: scanUrl,
+                tokenGeneratedTime: new Date().toISOString(),
+                mailSent: 'PENDING',
+            };
 
-            // Send confirmation email
-            let emailSent = false;
-            let emailAttempted = false;
+            await updateRowColumns(spreadsheetId, payment.rowIndex, updates, headers, headerMap);
+            console.log(`[Payment Processing] ✅ Sheet updated for row ${payment.rowIndex}`);
+
+            // PHASE 3: Send email NON-BLOCKING — do not await
             if (studentEmail && (mailSent === '' || mailSent === 'NO')) {
-                console.log(`[Payment Processing] 📤 Preparing to send confirmation email to ${studentEmail}...`);
-                emailAttempted = true;
-                const emailResult = await sendConfirmationEmail({
+                console.log(`[Payment Processing] 📤 Queueing email to ${studentEmail} (non-blocking)...`);
+                sendConfirmationEmail({
                     senderType,
                     to: studentEmail,
                     name: studentName,
                     day1Events,
                     day2Events,
                     scanUrl,
+                }).then(async (emailResult) => {
+                    const mailStatus = emailResult ? 'YES' : 'NO';
+                    console.log(`[Payment Processing] ${emailResult ? '✅' : '❌'} Email ${mailStatus} for row ${payment.rowIndex}`);
+                    try {
+                        await updateRowColumns(spreadsheetId, payment.rowIndex, { mailSent: mailStatus }, headers, headerMap);
+                    } catch (updateErr) {
+                        console.error(`[Payment Processing] Failed to update Mail_Sent for row ${payment.rowIndex}:`, updateErr.message);
+                    }
+                }).catch((err) => {
+                    console.error(`[Payment Processing] ❌ Email error for row ${payment.rowIndex}:`, err.message);
+                    updateRowColumns(spreadsheetId, payment.rowIndex, { mailSent: 'NO' }, headers, headerMap).catch(() => {});
                 });
-                if (emailResult) {
-                    emailSent = true;
-                    console.log(`[Payment Processing] ✅ Email sent successfully to ${studentEmail}`);
-                } else {
-                    console.error(`[Payment Processing] ❌ Email sending failed for ${studentEmail}`);
-                }
             } else {
                 if (!studentEmail) {
-                    console.warn(`[Payment Processing] ⚠️ No email address found for row ${payment.rowIndex}`);
+                    console.warn(`[Payment Processing] ⚠️ No email for row ${payment.rowIndex}`);
+                    await updateRowColumns(spreadsheetId, payment.rowIndex, { mailSent: 'NO_EMAIL' }, headers, headerMap);
                 }
                 if (mailSent === 'YES') {
                     console.log(`[Payment Processing] ⏭️ Email already sent for row ${payment.rowIndex}`);
                 }
             }
 
-            // Update sheet with token, QR link, timestamp, and Mail_Sent status
-            const updates = {
-                token: token,
-                qrLink: scanUrl,
-                tokenGeneratedTime: new Date().toISOString(),
-            };
-
-            // Only update Mail_Sent if email was actually sent
-            if (emailSent) {
-                updates.mailSent = 'YES';
-                console.log(`[Payment Processing] ✅ Mail_Sent will be updated to YES`);
-            } else if (emailAttempted) {
-                updates.mailSent = 'NO';
-                console.log(`[Payment Processing] ⚠️ Mail_Sent will be updated to NO (email failed)`);
-            } else {
-                console.log(`[Payment Processing] ⏭️ Mail_Sent will NOT be updated (email not attempted)`);
-            }
-
-            await updateRowColumns(spreadsheetId, payment.rowIndex, updates, headers, headerMap);
-
             processed.push({
                 rowIndex: payment.rowIndex,
                 senderType,
-                emailSent,
+                emailSent: 'QUEUED',
             });
 
-            console.log(`[Payment Processing] ✅ Successfully processed row ${payment.rowIndex}`);
+            console.log(`[Payment Processing] ✅ Row ${payment.rowIndex} done (email queued)`);
         } catch (error) {
             console.error(`[Payment Processing] ❌ Failed to process payment at row ${payment.rowIndex}:`, error.message);
         }
@@ -352,12 +341,10 @@ const handleScan = async (token) => {
     const studentName = nameIdx === -1 ? 'Student' : normalizeValue(row[nameIdx]) || 'Student';
     
     if (studentEmail) {
-        try {
-            console.log(`[Scan Handler] 📤 Sending attendance email to ${studentEmail}...`);
-            const { day1Events, day2Events } = extractEvents(row, headers);
-            const { scanUrl } = await generateQRCode(normalizedToken);
-
-            await sendAttendanceEmail({
+        // Non-blocking: fire and forget attendance email
+        const { day1Events, day2Events } = extractEvents(row, headers);
+        generateQRCode(normalizedToken).then(({ scanUrl }) => {
+            return sendAttendanceEmail({
                 senderType,
                 to: studentEmail,
                 name: studentName,
@@ -365,10 +352,11 @@ const handleScan = async (token) => {
                 day2Events,
                 scanUrl,
             });
+        }).then(() => {
             console.log(`[Scan Handler] ✅ Attendance email sent to ${studentEmail}`);
-        } catch (error) {
+        }).catch((error) => {
             console.error(`[Scan Handler] ❌ Attendance email failed for ${studentEmail}:`, error.message);
-        }
+        });
     }
 
     return { rowIndex, senderType };
