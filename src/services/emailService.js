@@ -1,4 +1,8 @@
 const nodemailer = require('nodemailer');
+const dns = require('dns');
+
+// Force IPv4 globally — Render free tier has no IPv6 support
+dns.setDefaultResultOrder('ipv4first');
 
 const smtpConfig = {
     host: 'smtp.gmail.com',
