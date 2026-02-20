@@ -1,54 +1,88 @@
 const nodemailer = require('nodemailer');
 const dns = require('dns');
+const { promisify } = require('util');
 
-// Force IPv4 globally — Render free tier has no IPv6 support
-dns.setDefaultResultOrder('ipv4first');
+const resolve4 = promisify(dns.resolve4);
 
-const smtpConfig = {
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    family: 4,
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-    tls: {
-        rejectUnauthorized: false,
-    },
+// Cache resolved IPv4 address and transporters
+let gmailIPv4 = null;
+let csTransporter = null;
+let ncsTransporter = null;
+
+const resolveGmailIPv4 = async () => {
+    if (gmailIPv4) return gmailIPv4;
+    try {
+        const addresses = await resolve4('smtp.gmail.com');
+        gmailIPv4 = addresses[0];
+        console.log(`[SMTP] Resolved smtp.gmail.com → ${gmailIPv4}`);
+        return gmailIPv4;
+    } catch (err) {
+        console.error('[SMTP] DNS resolve failed, falling back to hostname:', err.message);
+        return 'smtp.gmail.com';
+    }
 };
 
-const csTransporter = nodemailer.createTransport({
-    ...smtpConfig,
-    auth: {
-        user: process.env.CS_EMAIL_USER,
-        pass: process.env.CS_EMAIL_PASS,
+const buildSmtpConfig = (host) => ({
+    host,
+    port: 465,
+    secure: true,
+    connectionTimeout: 30000,
+    greetingTimeout: 20000,
+    socketTimeout: 30000,
+    tls: {
+        rejectUnauthorized: false,
+        servername: 'smtp.gmail.com',
     },
 });
 
-const ncsTransporter = nodemailer.createTransport({
-    ...smtpConfig,
-    auth: {
-        user: process.env.NCS_EMAIL_USER,
-        pass: process.env.NCS_EMAIL_PASS,
-    },
-});
+const getCSTransporter = async () => {
+    if (csTransporter) return csTransporter;
+    const ip = await resolveGmailIPv4();
+    csTransporter = nodemailer.createTransport({
+        ...buildSmtpConfig(ip),
+        auth: {
+            user: process.env.CS_EMAIL_USER,
+            pass: process.env.CS_EMAIL_PASS,
+        },
+    });
+    return csTransporter;
+};
 
-csTransporter.verify()
-    .then(() => console.log('CS SMTP Ready (port 587)'))
-    .catch((err) => console.error('CS SMTP verify failed:', err.message));
+const getNCSTransporter = async () => {
+    if (ncsTransporter) return ncsTransporter;
+    const ip = await resolveGmailIPv4();
+    ncsTransporter = nodemailer.createTransport({
+        ...buildSmtpConfig(ip),
+        auth: {
+            user: process.env.NCS_EMAIL_USER,
+            pass: process.env.NCS_EMAIL_PASS,
+        },
+    });
+    return ncsTransporter;
+};
 
-ncsTransporter.verify()
-    .then(() => console.log('NCS SMTP Ready (port 587)'))
-    .catch((err) => console.error('NCS SMTP verify failed:', err.message));
+// Verify on startup (non-blocking)
+(async () => {
+    try {
+        const cs = await getCSTransporter();
+        await cs.verify();
+        console.log('[SMTP] CS Ready (port 465, IPv4)');
+    } catch (err) {
+        console.error('[SMTP] CS verify failed:', err.message);
+    }
+    try {
+        const ncs = await getNCSTransporter();
+        await ncs.verify();
+        console.log('[SMTP] NCS Ready (port 465, IPv4)');
+    } catch (err) {
+        console.error('[SMTP] NCS verify failed:', err.message);
+    }
+})();
 
-const getTransporter = (senderType) => {
+const getTransporter = async (senderType) => {
     const type = String(senderType || '').toUpperCase();
-    if (type === 'NCS') {
-        return ncsTransporter;
-    }
-    if (type === 'CS') {
-        return csTransporter;
-    }
+    if (type === 'NCS') return getNCSTransporter();
+    if (type === 'CS') return getCSTransporter();
     throw new Error(`Unknown sender type: ${senderType}`);
 };
 
@@ -211,7 +245,7 @@ const sendConfirmationEmail = async ({
     day2Events,
     scanUrl,
 }) => {
-    const transporter = getTransporter(senderType);
+    const transporter = await getTransporter(senderType);
     const htmlBody = renderEmailTemplate({
         title: 'Registration Confirmed',
         greeting: `Hello <strong>${name}</strong>,`,
@@ -250,7 +284,7 @@ const sendAttendanceEmail = async ({
     day2Events,
     scanUrl,
 }) => {
-    const transporter = getTransporter(senderType);
+    const transporter = await getTransporter(senderType);
     const htmlBody = renderEmailTemplate({
         title: 'Attendance Confirmed',
         greeting: `Hello <strong>${name}</strong>,`,
