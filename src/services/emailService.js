@@ -4,6 +4,7 @@ const smtpConfig = {
     host: 'smtp.gmail.com',
     port: 587,
     secure: false,
+    family: 4,
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000,
