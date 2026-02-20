@@ -13,7 +13,7 @@ validateEnv();
 //    BASE_URL=https://your-ngrok-url.ngrok-free.app
 // 5. Restart server
 
-const server = app.listen(env.port, () => {
+const server = app.listen(env.port, '0.0.0.0', () => {
     console.log(`Server is running on port ${env.port}`);
     console.log('Running with BASE_URL:', process.env.BASE_URL);
 });
