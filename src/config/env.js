@@ -16,11 +16,8 @@ const required = [
 
 const validateEnv = () => {
     const missing = required.filter((key) => !process.env[key] || String(process.env[key]).trim() === '');
-    // Need either GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_KEY
-    const hasJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON && String(process.env.GOOGLE_SERVICE_ACCOUNT_JSON).trim() !== '';
-    const hasKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY && String(process.env.GOOGLE_SERVICE_ACCOUNT_KEY).trim() !== '';
-    if (!hasJson && !hasKey) {
-        missing.push('GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_KEY');
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON || String(process.env.GOOGLE_SERVICE_ACCOUNT_JSON).trim() === '') {
+        missing.push('GOOGLE_SERVICE_ACCOUNT_JSON');
     }
     if (missing.length > 0) {
         throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
@@ -32,7 +29,6 @@ const env = {
     baseUrl: String(process.env.BASE_URL || '').trim().replace(/\/$/, ''),
     csSheetId: String(process.env.CS_SHEET_ID || '').trim(),
     ncsSheetId: String(process.env.NCS_SHEET_ID || '').trim(),
-    serviceAccountKey: String(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '').trim(),
     csEmailUser: String(process.env.CS_EMAIL_USER || '').trim(),
     csEmailPass: String(process.env.CS_EMAIL_PASS || '').trim(),
     ncsEmailUser: String(process.env.NCS_EMAIL_USER || '').trim(),
